@@ -32,7 +32,7 @@ h1{font-size:20px;margin:0 0 12px}
 </aside>
 <div id="map"></div>
 </div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 let map,routeLayers={};
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -123,6 +123,6 @@ async function start(){
  }
 }
 start();
-<\/script>
+</script>
 </body>
 </html>
