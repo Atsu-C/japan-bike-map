@@ -3,390 +3,126 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>日本バイク走破マップ v48</title>
+<title>日本バイク走破マップ v49</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}
 #app{display:flex;height:100vh}
-#side{width:360px;box-sizing:border-box;padding:16px;overflow:auto;border-right:1px solid #ddd;background:#fafafa}
+#side{width:330px;box-sizing:border-box;padding:16px;overflow:auto;border-right:1px solid #ddd;background:#fafafa}
 #map{flex:1}
 h1{font-size:20px;margin:0 0 12px}
-h2{font-size:15px;margin:20px 0 8px}
-button{border:1px solid #bbb;border-radius:6px;background:white;padding:7px 10px;cursor:pointer}
-button:hover{background:#f0f0f0}
-.drop{border:2px dashed #aaa;border-radius:8px;padding:18px;text-align:center;background:white;margin-bottom:12px}
-.drop.drag{background:#eef6ff;border-color:#468cff}
-.event{background:white;border:1px solid #ddd;border-radius:8px;padding:11px 12px;margin:8px 0}.event strong{display:block;font-size:15px;line-height:1.35;margin-bottom:7px;overflow-wrap:anywhere}.event .meta{display:flex;gap:12px;flex-wrap:wrap;color:#666;font-size:13px}.event .date{font-weight:600;color:#444}.event .actions{margin-top:9px}.event button{font-size:13px}.event .delete{color:#555}.event input,.event textarea{width:100%;box-sizing:border-box;border:1px solid #bbb;border-radius:5px;padding:6px;font:inherit}.event textarea{min-height:72px;resize:vertical}.event .edit-fields{display:none;margin-top:8px}.event.editing .edit-fields{display:block}.event .edit-actions{display:none;margin-top:7px}.event.editing .edit-actions{display:flex;gap:6px}.event-header{display:flex;justify-content:space-between;align-items:center;margin:20px 0 8px}.event-header h2{margin:0}.event-count{font-size:12px;color:#777;background:#eee;border-radius:12px;padding:3px 8px}
-.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.status{font-size:13px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:6px;white-space:pre-wrap}
+.event{background:#fff;border:1px solid #ddd;border-radius:8px;padding:11px 12px;margin:8px 0;cursor:pointer}
+.event:hover{background:#f7f7f7}
+.event strong{display:block;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.meta{color:#666;font-size:13px;margin-top:5px}
+.desc{margin-top:7px;line-height:1.45;white-space:pre-wrap;font-size:13px}
 .note{font-size:12px;color:#666;line-height:1.5}
+.count{font-size:12px;color:#777}
+.status{padding:8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#666;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
 </style>
 </head>
 <body>
 <div id="app">
 <aside id="side">
-<h1>日本バイク走破マップ v48</h1>
-<div class="actions"><button id="exportViewer">閲覧用ページを作成</button></div>
-<div id="drop" class="drop">KMZ / KML / GPX をここへドラッグ＆ドロップ<br>または<br><input id="file" type="file" accept=".kmz,.kml,.gpx"></div>
-<div id="status" class="status">準備完了</div>
-<div class="event-header"><h2>イベント</h2><span id="eventCount" class="event-count">0件</span></div>
+<h1>日本バイク走破マップ v49</h1>
+<div id="status" class="status">走行データを読み込んでいます…</div>
+<div><b>走行イベント</b> <span id="count" class="count"></span></div>
 <div id="events"></div>
-<p class="note">【v48】走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
+<p class="note">閲覧専用ページです。走行記録の追加・編集・削除はできません。</p>
 </aside>
 <div id="map"></div>
 </div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 <script>
-let DB='japanBikeRoutesV41', VER=1;
-let db, map, routeLayers={};
-
-function openDB(){
- return new Promise((res,rej)=>{
-  let r=indexedDB.open(DB,VER);
-  r.onupgradeneeded=()=>{
-   db=r.result;
-   if(!db.objectStoreNames.contains('events')) db.createObjectStore('events',{keyPath:'id'});
-  };
-  r.onsuccess=()=>{db=r.result;res()};
-  r.onerror=()=>rej(r.error);
- });
-}
-function tx(mode,fn){return new Promise((res,rej)=>{let t=db.transaction('events',mode),s=t.objectStore('events');fn(s,res,rej);t.onerror=()=>rej(t.error)})}
-function allEvents(){return new Promise((res,rej)=>{let t=db.transaction('events','readonly'),s=t.objectStore('events'),r=s.getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
-function saveEvent(e){return tx('readwrite',(s,res,rej)=>{let r=s.put(e);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
-function delEvent(id){return tx('readwrite',(s,res,rej)=>{let r=s.delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
-function status(x){document.getElementById('status').textContent=x}
-
-function parseFilename(name){
- let s=name.replace(/\.(kmz|kml|gpx)$/i,'');
- let date='', rest=s;
- let m=s.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})\s*(.*)$/);
- if(m){date=`${m[1]}-${m[2]}-${m[3]}`;}
- // Event name is the filename (without extension), exactly as requested.
- // Date is stored separately when a leading YYYY-MM-DD / YYYY_MM_DD / YYYYMMDD exists.
- return {date,name:s.trim()||'無題のツーリング'};
-}
-function parseXmlText(txt){
- let xml=new DOMParser().parseFromString(txt,'application/xml');
- let parserErr=xml.getElementsByTagName('parsererror')[0];
- if(parserErr) throw Error('GPXのXMLを解析できませんでした');
- return xml;
-}
-function firstElByLocalName(root,name){
- return Array.from(root.getElementsByTagName('*')).find(el=>(el.localName||el.nodeName.split(':').pop())===name)||null;
-}
-function allElsByLocalName(root,name){
- return Array.from(root.getElementsByTagName('*')).filter(el=>(el.localName||el.nodeName.split(':').pop())===name);
-}
-function parseGpx(txt){
- let xml=parseXmlText(txt),segments=[];
- const clean=arr=>{let out=[];for(let p of arr){if(!out.length||Math.abs(out[out.length-1][0]-p[0])>1e-10||Math.abs(out[out.length-1][1]-p[1])>1e-10)out.push(p)}return out};
- const pointsFrom=els=>clean(els.map(pt=>{let lat=Number(pt.getAttribute('lat')),lon=Number(pt.getAttribute('lon'));return Number.isFinite(lat)&&Number.isFinite(lon)?[lat,lon]:null}).filter(Boolean));
- for(let seg of allElsByLocalName(xml,'trkseg')){let p=pointsFrom(allElsByLocalName(seg,'trkpt'));if(p.length>=2)segments.push(p)}
- if(!segments.length){for(let rte of allElsByLocalName(xml,'rte')){let p=pointsFrom(allElsByLocalName(rte,'rtept'));if(p.length>=2)segments.push(p)}}
- if(!segments.length)throw Error('GPX内に走行ルートのtrkpt/rteptが見つかりません');
- let metadata=firstElByLocalName(xml,'metadata');
- let metaName=metadata?firstElByLocalName(metadata,'name'):null;
- let trk=firstElByLocalName(xml,'trk'), trkName=trk?firstElByLocalName(trk,'name'):null;
- let rte=firstElByLocalName(xml,'rte'), rteName=rte?firstElByLocalName(rte,'name'):null;
- let gpxName=(metaName?.textContent||trkName?.textContent||rteName?.textContent||'').trim();
- let times=[];
- for(let el of [...allElsByLocalName(xml,'trkpt'),...allElsByLocalName(xml,'rtept')]){let te=firstElByLocalName(el,'time');if(te){let d=new Date(te.textContent.trim());if(!isNaN(d))times.push(d)}}
- let eventTime=times.sort((a,b)=>a-b)[0]||null;
- return {segments,name:gpxName,eventTime};
-}
-async function getKml(file){
- // KMZ is a ZIP archive. Prefer the extension, but also recognize ZIP
- // files by their magic bytes so a renamed file still works.
- let head = new Uint8Array(await file.slice(0,4).arrayBuffer());
- let isZip = head.length===4 && head[0]===0x50 && head[1]===0x4b && head[2]===0x03 && head[3]===0x04;
- if(/\.kmz$/i.test(file.name) || isZip){
-  let z=await JSZip.loadAsync(file);
-  let names=Object.keys(z.files);
-  let f=names.find(x=>/\.kml$/i.test(x) && !z.files[x].dir);
-  if(!f) throw Error('KMZ内にKMLがありません');
-  return await z.files[f].async('string');
- }
- return await file.text();
-}
-function coordsFromKml(txt){
- let xml=new DOMParser().parseFromString(txt,'application/xml');
- let parserErr=xml.getElementsByTagName('parsererror')[0];
- if(parserErr) throw Error('KMLのXMLを解析できませんでした');
-
- let segments=[];
- const parseCoords=(text)=>{
-  let out=[];
-  for(let p of (text||'').trim().split(/\s+/)){
-   if(!p) continue;
-   let a=p.split(',');
-   let lon=+a[0], lat=+a[1];
-   if(Number.isFinite(lat)&&Number.isFinite(lon)) out.push([lat,lon]);
-  }
-  return out;
- };
- const clean=(arr)=>{
-  let out=[];
-  for(let p of arr){
-   if(!out.length || Math.abs(out[out.length-1][0]-p[0])>1e-10 || Math.abs(out[out.length-1][1]-p[1])>1e-10) out.push(p);
-  }
-  return out;
- };
-
- // IMPORTANT: preserve each LineString as an independent path.
- // This prevents a straight "connecting line" being drawn between
- // two geographically separate road sections in a Google My Maps export.
- let lineEls=Array.from(xml.getElementsByTagName('*')).filter(el=>{
-  return (el.localName || el.nodeName.split(':').pop())==='LineString';
- });
- for(let line of lineEls){
-  let ce=Array.from(line.getElementsByTagName('*')).find(el=>(el.localName||el.nodeName.split(':').pop())==='coordinates');
-  if(ce){
-   let p=clean(parseCoords(ce.textContent));
-   if(p.length>=2) segments.push(p);
-  }
- }
-
- // If there are no LineStrings, support gx:Track / gx:coord as one path.
- if(!segments.length){
-  let trackEls=Array.from(xml.getElementsByTagName('*')).filter(el=>{
-   return (el.localName||el.nodeName.split(':').pop())==='Track';
-  });
-  for(let tr of trackEls){
-   let p=[];
-   for(let el of Array.from(tr.getElementsByTagName('*'))){
-    let n=el.localName||el.nodeName.split(':').pop();
-    if(n==='coord'){
-     let a=(el.textContent||'').trim().split(/\s+/);
-     if(a.length>=2){
-      let lon=+a[0],lat=+a[1];
-      if(Number.isFinite(lat)&&Number.isFinite(lon)) p.push([lat,lon]);
-     }
-    }
-   }
-   p=clean(p);
-   if(p.length>=2) segments.push(p);
-  }
- }
-
- // Last fallback: standalone coordinates elements, each kept as a segment.
- if(!segments.length){
-  let coordsEls=Array.from(xml.getElementsByTagName('*')).filter(el=>{
-   return (el.localName||el.nodeName.split(':').pop())==='coordinates';
-  });
-  for(let ce of coordsEls){
-   let p=clean(parseCoords(ce.textContent));
-   if(p.length>=2) segments.push(p);
-  }
- }
-
- if(!segments.length) throw Error('KML内に走行ルートの座標が見つかりません');
- return segments;
-}
-function dist(a,b){
- let R=6371000, p=Math.PI/180, dlat=(b[0]-a[0])*p, dlon=(b[1]-a[1])*p;
- let x=Math.sin(dlat/2)**2+Math.cos(a[0]*p)*Math.cos(b[0]*p)*Math.sin(dlon/2)**2;
- return 2*R*Math.asin(Math.sqrt(x));
-}
-function resample(points, step=50){
- let out=[points[0]], cum=0;
- for(let i=1;i<points.length;i++){
-  let a=points[i-1],b=points[i],d=dist(a,b);
-  if(d<1){continue}
-  cum+=d;
-  if(cum>=step){out.push(b);cum=0}
- }
- if(out[out.length-1]!==points[points.length-1])out.push(points[points.length-1]);
- return out;
-}
-function calcKm(p){let x=0;for(let i=1;i<p.length;i++)x+=dist(p[i-1],p[i]);return x/1000}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-
-function pointToSegmentMetersLL(p,a,b){
- let lat0=((p[0]+a[0]+b[0])/3)*Math.PI/180,kLat=111320,kLon=111320*Math.cos(lat0);
- let px=p[1]*kLon,py=p[0]*kLat,ax=a[1]*kLon,ay=a[0]*kLat,bx=b[1]*kLon,by=b[0]*kLat,dx=bx-ax,dy=by-ay;
- let t=(dx*dx+dy*dy)?((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy):0;t=Math.max(0,Math.min(1,t));
- return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));
+let map,routeLayers={};
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function titleDate(e){
+ const n=String(e.name||'').trim();
+ const m=n.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?=\\s|_|-|$)/);
+ if(m)return m[1]+m[2]+m[3];
+ const d=String(e.date||'');
+ const md=d.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})/);
+ return md?md[1]+md[2]+md[3]:'';
 }
 function routeDistanceToPoint(e,p){
- let best=Infinity;
- for(const path of (e.paths||[e.points]||[])){
+ let best=1e9;
+ for(const path of (e.paths||[e.points||[]])){
   if(!path||path.length<2)continue;
-  for(let i=1;i<path.length;i++){
-   const d=pointToSegmentMetersLL(p,path[i-1],path[i]);
+  for(let i=0;i<path.length;i++){
+   const q=path[i];
+   const d=map.distance(p,q);
    if(d<best)best=d;
-   if(best<1)return best;
+   if(i){
+    const a=path[i-1],b=q;
+    const lat=p[0]*Math.PI/180;
+    const x=(b[1]-a[1])*Math.cos(lat),y=b[0]-a[0];
+    const px=(p[1]-a[1])*Math.cos(lat),py=p[0]-a[0];
+    const den=x*x+y*y;
+    if(den){
+     let t=Math.max(0,Math.min(1,(px*x+py*y)/den));
+     const qq=[a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])];
+     best=Math.min(best,map.distance(p,qq));
+    }
+   }
   }
  }
  return best;
 }
-async function showRouteHistory(latlng, primaryId=null){
- const p=[latlng.lat,latlng.lng];
- const es=await allEvents();
+function history(latlng,primary,events){
  const hits=[];
- for(const e of es){
-  // The line that was actually clicked is always included.
-  // This avoids false negatives caused by coordinate simplification/resampling.
-  const d=routeDistanceToPoint(e,p);
-  if(e.id===primaryId) hits.push({e,d:0,primary:true});
-  else if(d<=100) hits.push({e,d,primary:false});
+ for(const e of events){
+  const d=routeDistanceToPoint(e,[latlng.lat,latlng.lng]);
+  if(e.id===primary||d<=100)hits.push({e,d});
  }
- hits.sort((a,b)=>(a.e.date||'').localeCompare(b.e.date||'')||a.e.name.localeCompare(b.e.name));
- let html='<strong>この場所の走行履歴</strong>';
- if(!hits.length){html+='<br>該当する走行イベントはありません。';}
- else{
-  html+='<div style="margin-top:6px">'+hits.map(({e})=>{
-   const date=esc(e.date||'日付なし'),name=esc(e.name),km=Number(e.km||0).toFixed(1);
-   return `<div style="margin:7px 0;padding-bottom:6px;border-bottom:1px solid #ddd"><b>${name}</b><br><span style="color:#666">${date}</span><br><span style="color:#666">走行距離 ${km} km</span></div>`;
-  }).join('')+'</div>';
- }
+ hits.sort((a,b)=>titleDate(b.e).localeCompare(titleDate(a.e))||String(b.e.name).localeCompare(String(a.e.name)));
+ let html='<b>この場所の走行履歴</b>';
+ if(!hits.length)html+='<br>該当する走行イベントはありません。';
+ else html+='<div style="margin-top:6px">'+hits.map(({e})=>'<div style="margin:7px 0;padding-bottom:6px;border-bottom:1px solid #ddd"><b>'+esc(e.name)+'</b><br><span style="color:#666">走行距離 '+Number(e.km||0).toFixed(1)+' km</span>'+(e.description?'<br><span style="color:#666;white-space:pre-wrap">'+esc(e.description)+'</span>':'')+'</div>').join('')+'</div>';
  L.popup({maxWidth:340}).setLatLng(latlng).setContent(html).openOn(map);
 }
-function drawEvent(e){
+function draw(e,events){
  if(routeLayers[e.id])routeLayers[e.id].remove();
- let group=L.featureGroup();
- let paths=e.paths || [e.points];
- for(let path of paths){
-  if(path && path.length>=2){
-   const line=L.polyline(path,{color:'red',weight:4,opacity:.85,interactive:true});
-   line.on('click',ev=>showRouteHistory(ev.latlng,e.id));
-   line.addTo(group);
-  }
- }
- group.addTo(map);
- routeLayers[e.id]=group;
- if(!map.getBounds().isValid() || Object.keys(routeLayers).length===1)map.fitBounds(group.getBounds(),{padding:[20,20]});
+ const g=L.featureGroup();
+ for(const path of (e.paths||[e.points]))
+  if(path&&path.length>=2)L.polyline(path,{color:'red',weight:4,opacity:.85}).on('click',ev=>history(ev.latlng,e.id,events)).addTo(g);
+ g.addTo(map);routeLayers[e.id]=g;return g;
 }
-
-// v39では道路ラベル取得・OSM道路照合を行いません。
-// クリックした走行線のイベントは必ず履歴に含め、他イベントは近接判定で追加します。
-
-async function importFile(file){
+function showError(msg){
+ document.getElementById('status').textContent='公開データを読み込めませんでした\\n'+msg;
+}
+async function start(){
  try{
-  let isGpx=/\.gpx$/i.test(file.name);
-  status(`${isGpx?'GPX':'KMZ/KML'}を読み込んでいます…`);
-  let meta=parseFilename(file.name), paths, gpxInfo=null;
-  if(isGpx){
-   let txt=await file.text();
-   gpxInfo=parseGpx(txt);
-   paths=gpxInfo.segments.map(p=>resample(p,50)).filter(p=>p.length>=2);
-   if(!meta.date && gpxInfo.eventTime)meta.date=gpxInfo.eventTime.toISOString().slice(0,10);
-   if(meta.name==='無題のツーリング' && gpxInfo.name)meta.name=gpxInfo.name;
-  }else{
-   let txt=await getKml(file);
-   let rawSegments=coordsFromKml(txt);
-   paths=rawSegments.map(p=>resample(p,50)).filter(p=>p.length>=2);
+  const res=await fetch('data/events.json?v='+Date.now(),{cache:'no-store'});
+  if(!res.ok)throw new Error('data/events.json が見つかりません（HTTP '+res.status+'）');
+  const events=await res.json();
+  if(!Array.isArray(events))throw new Error('events.json の形式が正しくありません');
+  map=L.map('map').setView([36.2,138.3],6);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
+  const es=[...events].sort((a,b)=>{
+   const ad=titleDate(a),bd=titleDate(b);
+   if(ad&&bd)return bd.localeCompare(ad);
+   if(ad)return -1;if(bd)return 1;
+   return String(b.name).localeCompare(String(a.name));
+  });
+  document.getElementById('status').textContent='公開データを読み込みました';
+  document.getElementById('count').textContent=es.length+'件';
+  const box=document.getElementById('events');
+  let all=L.featureGroup();
+  for(const e of es){
+   const d=document.createElement('div');d.className='event';
+   d.innerHTML='<strong>'+esc(e.name||'無題のツーリング')+'</strong><div class="meta">走行距離 '+Number(e.km||0).toFixed(1)+' km</div>'+(e.description?'<div class="desc">'+esc(e.description)+'</div>':'');
+   d.onclick=()=>{const g=routeLayers[e.id]||draw(e,es);if(g.getBounds().isValid())map.fitBounds(g.getBounds(),{padding:[20,20]})};
+   box.appendChild(d);
+   const g=draw(e,es);if(g.getBounds().isValid())all.addLayer(g);
   }
-  let points=paths.flat();
-  let km=paths.reduce((sum,p)=>sum+calcKm(p),0);
-  let e={id:crypto.randomUUID(),date:meta.date,name:meta.name,source:file.name,sourceType:isGpx?'GPX':'KML/KMZ',paths,points,km,description:'',created:new Date().toISOString()};
-  await saveEvent(e);drawEvent(e);renderEvents();
-  status(`走行記録を保存しました\n${e.date||'日付なし'} ${e.name}\n約${e.km.toFixed(1)} km\n\n赤い走行線をクリックすると、その場所の走行履歴を表示できます。`);
- }catch(err){status('読み込みエラー\n'+(err&&err.message?err.message:String(err)))}
-}
-async function renderEvents(){
- let box=document.getElementById('events');
- let countBox=document.getElementById('eventCount');
- box.innerHTML='';
- // 並び順は「イベント名の先頭の日付」を最優先。
- // 正式ルール: YYYYMMDD（区切り文字として - _ . も許容）
- // 例: 20260912 九州ツーリング → 2026/09/12 として新しい順。
- function titleDate(e){
-  const n=String(e.name||'').trim();
-  const m=n.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?=\s|_|-|$)/);
-  if(m) return `${m[1]}${m[2]}${m[3]}`;
-  // 旧データなど、イベント名に日付がない場合は保存済みdateを利用
-  const d=String(e.date||'');
-  const md=d.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})/);
-  return md ? `${md[1]}${md[2]}${md[3]}` : '';
- }
- let es=(await allEvents()).sort((a,b)=>{
-  const ad=titleDate(a), bd=titleDate(b);
-  if(ad && bd) return bd.localeCompare(ad)||String(b.created||'').localeCompare(String(a.created||''));
-  if(ad && !bd) return -1;
-  if(!ad && bd) return 1;
-  return String(b.created||'').localeCompare(String(a.created||''));
- });
- countBox.textContent=`${es.length}件`;
- if(!es.length){box.innerHTML='<div class="note">まだ走行記録はありません。</div>';return}
- for(let e of es){
-  let d=document.createElement('div');d.className='event';
-  // タイトルはイベント名そのもの。日付を別途付加しない。
-  const title=e.name||'無題のツーリング';
-  const km=Number(e.km||0).toFixed(1);
-  const desc=String(e.description||'');
-  d.innerHTML=`<strong>${esc(title)}</strong>
-   <div class="meta"><span>走行距離 ${km} km</span></div>
-   ${desc?`<div class="event-desc" style="margin-top:7px;line-height:1.45;white-space:pre-wrap">${esc(desc)}</div>`:''}
-   <div class="edit-fields">
-    <label style="display:block;font-size:12px;color:#666;margin-bottom:3px">イベント名</label>
-    <input data-name maxlength="200" value="${esc(e.name||'')}">
-    <label style="display:block;font-size:12px;color:#666;margin:8px 0 3px">メモ（200文字程度）</label>
-    <textarea data-desc maxlength="200" placeholder="このツーリングについてのメモ">${esc(desc)}</textarea>
-   </div>
-   <div class="actions"><button data-show>地図で表示</button><button data-edit>編集</button><button class="delete" data-del>このイベントを消去</button></div>
-   <div class="edit-actions"><button data-save>保存</button><button data-cancel>キャンセル</button></div>`;
-  d.querySelector('[data-show]').onclick=()=>{
-   if(!routeLayers[e.id]) drawEvent(e);
-   else map.fitBounds(routeLayers[e.id].getBounds(),{padding:[20,20]});
-  };
-  d.querySelector('[data-edit]').onclick=()=>{d.classList.add('editing');d.querySelector('[data-name]').focus()};
-  d.querySelector('[data-cancel]').onclick=()=>renderEvents();
-  d.querySelector('[data-save]').onclick=async()=>{
-   const name=d.querySelector('[data-name]').value.trim()||'無題のツーリング';
-   const description=d.querySelector('[data-desc]').value.slice(0,200);
-   e.name=name;e.description=description;
-   await saveEvent(e);
-   await renderEvents();
-   status(`イベント情報を保存しました\n${e.name}`);
-  };
-  d.querySelector('[data-del]').onclick=async()=>{
-   if(confirm(`「${title}」を消去しますか？\nこのイベントだけが削除されます。`)){
-    await delEvent(e.id);
-    if(routeLayers[e.id]) routeLayers[e.id].remove();
-    delete routeLayers[e.id];
-    await renderEvents();
-    status(`「${title}」を消去しました。`);
-   }
-  };
-  box.appendChild(d);
+  if(all.getLayers().length)map.fitBounds(all.getBounds(),{padding:[20,20]});
+ }catch(err){
+  showError(err&&err.message?err.message:String(err));
+  map=L.map('map').setView([36.2,138.3],6);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
  }
 }
-let drop=document.getElementById('drop'), input=document.getElementById('file');
-drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag')});
-drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
-drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');let f=e.dataTransfer.files[0];if(f)importFile(f)});
-input.addEventListener('change',e=>{if(e.target.files[0])importFile(e.target.files[0])});
-map=L.map('map').setView([36.2,138.3],6);
-L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
-async function migrateFromOldDB(){
- let current=await allEvents();
- if(current.length)return current;
- for(const oldName of ['japanBikeRoutesV41','japanBikeRoutesV40','japanBikeRoutesV39','japanBikeRoutesV38','japanBikeRoutesV37','japanBikeRoutesV36','japanBikeRoutesV35','japanBikeRoutesV33','japanBikeRoutesV32']){
-  try{
-   const old=await new Promise((res,rej)=>{let r=indexedDB.open(oldName);r.onsuccess=()=>{let od=r.result;if(!od.objectStoreNames.contains('events')){od.close();res([]);return}let tx=od.transaction('events','readonly'),q=tx.objectStore('events').getAll();q.onsuccess=()=>{let a=q.result||[];od.close();res(a)};q.onerror=()=>{od.close();res([])}};r.onerror=()=>res([])});
-   if(old.length){for(const e of old)await saveEvent(e);return await allEvents();}
-  }catch(_){ }
- }
- return [];
-}
-openDB().then(async()=>{let es=await migrateFromOldDB();await renderEvents();for(let e of es)drawEvent(e);status(es.length?'既存の走行記録を引き継ぎました。準備完了':'準備完了')}).catch(e=>status('データベース初期化エラー\n'+e.message));
-
-async function exportViewer(){
- const es=await allEvents();
- if(!es.length){alert('閲覧用ページに書き出す走行記録がありません。');return;}
- const payload=JSON.stringify(es).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
- const html=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>日本バイク走破マップ</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}#app{display:flex;height:100vh}#side{width:330px;box-sizing:border-box;padding:16px;overflow:auto;border-right:1px solid #ddd;background:#fafafa}#map{flex:1}h1{font-size:20px;margin:0 0 12px}.event{background:#fff;border:1px solid #ddd;border-radius:8px;padding:11px 12px;margin:8px 0}.event strong{display:block;font-size:15px;line-height:1.35;overflow-wrap:anywhere}.meta{color:#666;font-size:13px;margin-top:5px}.desc{margin-top:7px;line-height:1.45;white-space:pre-wrap;font-size:13px}.note{font-size:12px;color:#666;line-height:1.5}.count{font-size:12px;color:#777}</style></head><body><div id="app"><aside id="side"><h1>日本バイク走破マップ</h1><div><b>走行イベント</b> <span id="count" class="count"></span></div><div id="events"></div><p class="note">閲覧専用ページです。走行記録の追加・編集・削除はできません。</p></aside><div id="map"></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script><script>const EVENTS=${payload};let map,routeLayers={};
-function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function titleDate(e){const n=String(e.name||'').trim();const m=n.match(/^(\\d{4})[-_.]?(\\d{2})[-_.]?(\\d{2})(?=\\s|_|-|$)/);if(m)return m[1]+m[2]+m[3];const d=String(e.date||'');const md=d.match(/^(\\d{4})[-_.]?(\\d{2})[-_.]?(\\d{2})/);return md?md[1]+md[2]+md[3]:''}
-function routeDistanceToPoint(e,p){let best=1e9;for(const path of (e.paths||[e.points||[]]))for(let i=0;i<path.length;i++){const q=path[i];const d=map.distance(p,q);if(d<best)best=d;if(i){const a=path[i-1],b=q;const lat=p[0]*Math.PI/180, lon=p[1]*Math.PI/180;const x=(b[1]-a[1])*Math.cos(lat),y=b[0]-a[0],px=(p[1]-a[1])*Math.cos(lat),py=p[0]-a[0],den=x*x+y*y;if(den){let t=Math.max(0,Math.min(1,(px*x+py*y)/den));const qq=[a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])];best=Math.min(best,map.distance(p,qq))}}}return best}
-function history(latlng,primary){const hits=[];for(const e of EVENTS){const d=routeDistanceToPoint(e,[latlng.lat,latlng.lng]);if(e.id===primary||d<=100)hits.push({e,d})}hits.sort((a,b)=>titleDate(b.e).localeCompare(titleDate(a.e))||String(b.e.name).localeCompare(String(a.e.name)));let html='<b>この場所の走行履歴</b>';if(!hits.length)html+='<br>該当する走行イベントはありません。';else html+='<div style="margin-top:6px">'+hits.map(({e})=>'<div style="margin:7px 0;padding-bottom:6px;border-bottom:1px solid #ddd"><b>'+esc(e.name)+'</b><br><span style="color:#666">走行距離 '+Number(e.km||0).toFixed(1)+' km</span>'+(e.description?'<br><span style="color:#666;white-space:pre-wrap">'+esc(e.description)+'</span>':'')+'</div>').join('')+'</div>';L.popup({maxWidth:340}).setLatLng(latlng).setContent(html).openOn(map)}
-function draw(e){if(routeLayers[e.id])routeLayers[e.id].remove();const g=L.featureGroup();for(const path of (e.paths||[e.points]))if(path&&path.length>=2)L.polyline(path,{color:'red',weight:4,opacity:.85}).on('click',ev=>history(ev.latlng,e.id)).addTo(g);g.addTo(map);routeLayers[e.id]=g;return g}
-map=L.map('map').setView([36.2,138.3],6);L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
-const es=[...EVENTS].sort((a,b)=>{const ad=titleDate(a),bd=titleDate(b);if(ad&&bd)return bd.localeCompare(ad);if(ad)return -1;if(bd)return 1;return String(b.name).localeCompare(String(a.name))});document.getElementById('count').textContent=es.length+'件';const box=document.getElementById('events');let all=L.featureGroup();for(const e of es){const d=document.createElement('div');d.className='event';d.innerHTML='<strong>'+esc(e.name||'無題のツーリング')+'</strong><div class="meta">走行距離 '+Number(e.km||0).toFixed(1)+' km</div>'+(e.description?'<div class="desc">'+esc(e.description)+'</div>':'');d.onclick=()=>{const g=routeLayers[e.id]||draw(e);if(g.getBounds().isValid())map.fitBounds(g.getBounds(),{padding:[20,20]})};box.appendChild(d);const g=draw(e);if(g.getBounds().isValid())all.addLayer(g)}if(all.getLayers().length)map.fitBounds(all.getBounds(),{padding:[20,20]});<\/script></body></html>`;
- const blob=new Blob([html],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);const w=window.open(url,'_blank');if(!w){URL.revokeObjectURL(url);alert('新しいタブを開けませんでした。ブラウザのポップアップブロックを確認してください。');return;}status('閲覧用ページを新しいタブで開きました。');
-}
-document.getElementById('exportViewer').onclick=exportViewer;
-</script>
-</body></html>
+start();
+<\/script>
+</body>
+</html>
