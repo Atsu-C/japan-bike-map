@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>日本バイク走破マップ v51</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}
+#app{display:flex;height:100vh}
+#side{width:330px;box-sizing:border-box;padding:16px;overflow:auto;border-right:1px solid #ddd;background:#fafafa}
+#map{flex:1}
+h1{font-size:20px;margin:0 0 12px}
+.event{background:#fff;border:1px solid #ddd;border-radius:8px;padding:11px 12px;margin:8px 0;cursor:pointer}
+.event:hover{background:#f7f7f7}
+.event strong{display:block;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.meta{color:#666;font-size:13px;margin-top:5px}
+.desc{margin-top:7px;line-height:1.45;white-space:pre-wrap;font-size:13px}
+.note{font-size:12px;color:#666;line-height:1.5}
+.count{font-size:12px;color:#777}
+.status{padding:8px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#666;font-size:13px;margin-bottom:10px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div id="app">
+<aside id="side">
+<h1>日本バイク走破マップ v51</h1>
+<div id="status" class="status">走行データを読み込んでいます…</div>
+<div><b>走行イベント</b> <span id="count" class="count"></span></div>
+<div id="events"></div>
+<p class="note">閲覧専用ページです。走行記録の追加・編集・削除はできません。</p>
+</aside>
+<div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script>
+let map,routeLayers={};
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function titleDate(e){
+ const n=String(e.name||'').trim();
+ const m=n.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?=\\s|_|-|$)/);
+ if(m)return m[1]+m[2]+m[3];
+ const d=String(e.date||'');
+ const md=d.match(/^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})/);
+ return md?md[1]+md[2]+md[3]:'';
+}
+function routeDistanceToPoint(e,p){
+ let best=1e9;
+ for(const path of (e.paths||[e.points||[]])){
+  if(!path||path.length<2)continue;
+  for(let i=0;i<path.length;i++){
+   const q=path[i];
+   const d=map.distance(p,q);
+   if(d<best)best=d;
+   if(i){
+    const a=path[i-1],b=q;
+    const lat=p[0]*Math.PI/180;
+    const x=(b[1]-a[1])*Math.cos(lat),y=b[0]-a[0];
+    const px=(p[1]-a[1])*Math.cos(lat),py=p[0]-a[0];
+    const den=x*x+y*y;
+    if(den){
+     let t=Math.max(0,Math.min(1,(px*x+py*y)/den));
+     const qq=[a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])];
+     best=Math.min(best,map.distance(p,qq));
+    }
+   }
+  }
+ }
+ return best;
+}
+function history(latlng,primary,events){
+ const hits=[];
+ for(const e of events){
+  const d=routeDistanceToPoint(e,[latlng.lat,latlng.lng]);
+  if(e.id===primary||d<=100)hits.push({e,d});
+ }
+ hits.sort((a,b)=>titleDate(b.e).localeCompare(titleDate(a.e))||String(b.e.name).localeCompare(String(a.e.name)));
+ let html='<b>この場所の走行履歴</b>';
+ if(!hits.length)html+='<br>該当する走行イベントはありません。';
+ else html+='<div style="margin-top:6px">'+hits.map(({e})=>'<div style="margin:7px 0;padding-bottom:6px;border-bottom:1px solid #ddd"><b>'+esc(e.name)+'</b><br><span style="color:#666">走行距離 '+Number(e.km||0).toFixed(1)+' km</span>'+(e.description?'<br><span style="color:#666;white-space:pre-wrap">'+esc(e.description)+'</span>':'')+'</div>').join('')+'</div>';
+ L.popup({maxWidth:340}).setLatLng(latlng).setContent(html).openOn(map);
+}
+function draw(e,events){
+ if(routeLayers[e.id])routeLayers[e.id].remove();
+ const g=L.featureGroup();
+ for(const path of (e.paths||[e.points]))
+  if(path&&path.length>=2)L.polyline(path,{color:'red',weight:4,opacity:.85}).on('click',ev=>history(ev.latlng,e.id,events)).addTo(g);
+ g.addTo(map);routeLayers[e.id]=g;return g;
+}
+function showError(msg){
+ document.getElementById('status').textContent='公開データを読み込めませんでした\\n'+msg;
+}
+async function start(){
+ try{
+  const res=await fetch('data/events.json?v='+Date.now(),{cache:'no-store'});
+  if(!res.ok)throw new Error('data/events.json が見つかりません（HTTP '+res.status+'）');
+  const events=await res.json();
+  if(!Array.isArray(events))throw new Error('events.json の形式が正しくありません');
+  map=L.map('map').setView([36.2,138.3],6);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
+  const es=[...events].sort((a,b)=>{
+   const ad=titleDate(a),bd=titleDate(b);
+   if(ad&&bd)return bd.localeCompare(ad);
+   if(ad)return -1;if(bd)return 1;
+   return String(b.name).localeCompare(String(a.name));
+  });
+  document.getElementById('status').textContent='公開データを読み込みました';
+  document.getElementById('count').textContent=es.length+'件';
+  const box=document.getElementById('events');
+  let all=L.featureGroup();
+  for(const e of es){
+   const d=document.createElement('div');d.className='event';
+   d.innerHTML='<strong>'+esc(e.name||'無題のツーリング')+'</strong><div class="meta">走行距離 '+Number(e.km||0).toFixed(1)+' km</div>'+(e.description?'<div class="desc">'+esc(e.description)+'</div>':'');
+   d.onclick=()=>{const g=routeLayers[e.id]||draw(e,es);if(g.getBounds().isValid())map.fitBounds(g.getBounds(),{padding:[20,20]})};
+   box.appendChild(d);
+   const g=draw(e,es);if(g.getBounds().isValid())all.addLayer(g);
+  }
+  if(all.getLayers().length)map.fitBounds(all.getBounds(),{padding:[20,20]});
+ }catch(err){
+  showError(err&&err.message?err.message:String(err));
+  map=L.map('map').setView([36.2,138.3],6);
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'}).addTo(map);
+ }
+}
+start();
+<\/script>
+</body>
+</html>
