@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>日本バイク走破マップ v52.2</title>
+<title>日本バイク走破マップ v54.2</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}
@@ -71,7 +71,7 @@ button:hover{background:#f0f0f0}
 
 <div id="app">
 <aside id="side">
-<h1>日本バイク走破マップ v52.2</h1>
+<h1>日本バイク走破マップ v54.2</h1>
 <div class="actions">
 <button id="exportPublicData">公開用データを作成</button>
 <button id="loadRemote">公開データを読み込む</button>
@@ -83,7 +83,7 @@ button:hover{background:#f0f0f0}
 <div id="status" class="status">準備完了</div>
 <div class="event-header"><h2>イベント</h2><span id="eventCount" class="event-count">0件</span></div>
 <div id="events"></div>
-<p class="note"><b>このページは管理用です。</b>閲覧者には公開ページだけを案内してください。GitHubへ公開するには「GitHub設定」でTokenを一度設定します。<br><br>【v52.2】v51をベースに、自宅周辺のプライバシーゾーン（半径3km）を公開時だけ除外できるようにしました。走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
+<p class="note"><b>このページは管理用です。</b>閲覧者には公開ページだけを案内してください。GitHubへ公開するには「GitHub設定」でTokenを一度設定します。<br><br>【v54.2】v51をベースに、自宅周辺のプライバシーゾーン（半径3km）を公開時だけ除外します。3km円を横切る線分も正確に切断します。走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
 </aside>
 <div id="map"></div>
 </div>
@@ -450,70 +450,63 @@ function drawPrivacyMarker(){
   privacyMarker=L.circle([v.lat,v.lng],{radius:PRIVACY_RADIUS_M,color:'#555',weight:1,fillOpacity:.08,interactive:false}).addTo(map);
 }
 function distanceMeters(a,b){return dist(a,b);}
+// Privacy clipping: remove every portion of every route segment that enters the
+// 3km circle, including segments whose two endpoints are both outside the circle.
 function clipPathPrivacy(path,center){
   if(!path || path.length<2)return [];
-  const out=[];
-  // Keep route portions outside the 3km zone. When a segment crosses the zone boundary,
-  // add an approximate boundary point so the visible line ends at the boundary.
-  for(let i=0;i<path.length;i++){
-    const cur=path[i], prev=i?path[i-1]:null;
-    const dc=distanceMeters(cur,center);
-    const dp=prev?distanceMeters(prev,center):null;
-    const curOut=dc>=PRIVACY_RADIUS_M, prevOut=dp!=null&&dp>=PRIVACY_RADIUS_M;
-    if(i===0){if(curOut)out.push(cur);continue;}
-    if(curOut!==prevOut){
-      let lo=0,hi=1;
-      for(let k=0;k<20;k++){
-        const t=(lo+hi)/2;
-        const q=[prev[0]+(cur[0]-prev[0])*t,prev[1]+(cur[1]-prev[1])*t];
-        const inside=distanceMeters(q,center)<PRIVACY_RADIUS_M;
-        if(inside===curOut)hi=t;else lo=t;
-      }
-      const t=(lo+hi)/2;
-      out.push([prev[0]+(cur[0]-prev[0])*t,prev[1]+(cur[1]-prev[1])*t]);
+  const R=6371000, radius=PRIVACY_RADIUS_M;
+  const lat0=center[0]*Math.PI/180, cos0=Math.cos(lat0);
+  const toXY=p=>[(p[1]-center[1])*Math.PI/180*R*cos0,(p[0]-center[0])*Math.PI/180*R];
+  const fromXY=q=>[center[0]+q[1]/R*180/Math.PI,center[1]+q[0]/(R*cos0)*180/Math.PI];
+  const outParts=[]; let part=[];
+  const flush=()=>{if(part.length>=2)outParts.push(part);part=[];};
+  const addPoint=(pt)=>{
+    if(!part.length){part.push(pt);return;}
+    const last=part[part.length-1];
+    if(Math.abs(last[0]-pt[0])>1e-10 || Math.abs(last[1]-pt[1])>1e-10) part.push(pt);
+  };
+  for(let i=0;i<path.length-1;i++){
+    const a=path[i], b=path[i+1], A=toXY(a), B=toXY(b);
+    const dx=B[0]-A[0], dy=B[1]-A[1];
+    const qa=dx*dx+dy*dy;
+    if(qa===0)continue;
+    const qb=2*(A[0]*dx+A[1]*dy);
+    const qc=A[0]*A[0]+A[1]*A[1]-radius*radius;
+    const roots=[];
+    const disc=qb*qb-4*qa*qc;
+    if(disc>=0){
+      const sd=Math.sqrt(Math.max(0,disc));
+      const r1=(-qb-sd)/(2*qa), r2=(-qb+sd)/(2*qa);
+      if(r1>0 && r1<1)roots.push(r1);
+      if(r2>0 && r2<1 && Math.abs(r2-r1)>1e-12)roots.push(r2);
     }
-    if(curOut)out.push(cur);
+    const ts=[0,...roots.sort((x,y)=>x-y),1];
+    for(let j=0;j<ts.length-1;j++){
+      const t0=ts[j], t1=ts[j+1], tm=(t0+t1)/2;
+      const mx=A[0]+dx*tm, my=A[1]+dy*tm;
+      const outside=(mx*mx+my*my)>=radius*radius;
+      if(!outside){flush();continue;}
+      const p0=fromXY([A[0]+dx*t0,A[1]+dy*t0]);
+      const p1=fromXY([A[0]+dx*t1,A[1]+dy*t1]);
+      if(t0>0) { if(part.length) flush(); addPoint(p0); }
+      else addPoint(p0);
+      addPoint(p1);
+      if(t1<1) flush();
+    }
   }
-  // split contiguous visible points into independent paths
-  const parts=[];let part=[];
-  for(const pt of out){
-    if(pt===null){if(part.length>=2)parts.push(part);part=[];}else part.push(pt);
-  }
-  if(part.length>=2)parts.push(part);
-  return parts;
+  flush();
+  return outParts;
 }
 function makePublicEvents(es){
   const center=getPrivacyCenter();
   if(!center)return es;
+  const c=[center.lat,center.lng];
   return es.map(e=>{
     const sourcePaths=e.paths||[e.points||[]];
     const paths=[];
     for(const path of sourcePaths){
-      if(!path||path.length<2)continue;
-      // Build segments directly so portions inside the privacy zone are omitted.
-      let part=[];
-      const flush=()=>{if(part.length>=2)paths.push(part);part=[];};
-      for(let i=0;i<path.length;i++){
-        const cur=path[i], prev=i?path[i-1]:null;
-        const dc=distanceMeters(cur,[center.lat,center.lng]);
-        const dp=prev?distanceMeters(prev,[center.lat,center.lng]):null;
-        const co=dc>=PRIVACY_RADIUS_M, po=dp!=null&&dp>=PRIVACY_RADIUS_M;
-        if(i===0){if(co)part.push(cur);continue;}
-        if(co!==po){
-          let lo=0,hi=1;
-          for(let k=0;k<20;k++){
-            const t=(lo+hi)/2;
-            const q=[prev[0]+(cur[0]-prev[0])*t,prev[1]+(cur[1]-prev[1])*t];
-            const inside=distanceMeters(q,[center.lat,center.lng])<PRIVACY_RADIUS_M;
-            if(inside===co)hi=t;else lo=t;
-          }
-          const t=(lo+hi)/2;
-          part.push([prev[0]+(cur[0]-prev[0])*t,prev[1]+(cur[1]-prev[1])*t]);
-          if(co){} else flush();
-        }
-        if(co)part.push(cur); else if(po && !co)flush();
-      }
-      flush();
+      const clipped=clipPathPrivacy(path,c);
+      for(const p of clipped)if(p.length>=2)paths.push(p);
     }
     const points=paths.flat();
     return {...e,paths,points,km:paths.reduce((sum,p)=>sum+calcKm(p),0)};
