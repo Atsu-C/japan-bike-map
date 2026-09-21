@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>日本バイク走破マップ v51</title>
+<title>日本バイク走破マップ v52.2</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}
@@ -47,9 +47,31 @@ button:hover{background:#f0f0f0}
   </div>
 </div>
 
+
+<!-- Privacy settings modal: required by the privacy JavaScript below. -->
+<div id="privacyConfig" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9997;align-items:center;justify-content:center">
+  <div style="width:min(520px,92vw);background:white;border-radius:12px;padding:22px;box-sizing:border-box;box-shadow:0 8px 30px rgba(0,0,0,.12)">
+    <h2 style="margin:0 0 10px">自宅非公開設定（半径3km）</h2>
+    <p style="font-size:13px;color:#555;line-height:1.6;margin:0 0 10px">
+      公開ページでは、自宅として設定した地点から<strong>半径3km以内の走行ルートを非公開</strong>にします。<br>
+      自宅位置はGitHubの公開データには保存せず、このブラウザのローカル保存領域だけに保存します。
+    </p>
+    <div id="privacyStatus" style="font-size:13px;padding:10px;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;line-height:1.6"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      <button id="setPrivacyPoint">地図上で自宅位置を設定</button>
+      <button id="clearPrivacyPoint">設定を消去</button>
+      <button id="closePrivacy" style="margin-left:auto">閉じる</button>
+    </div>
+    <p style="font-size:12px;color:#777;line-height:1.5;margin:12px 0 0">
+      ※「地図上で自宅位置を設定」を押した後、地図上の自宅付近を1回クリックしてください。<br>
+      ※設定後に「GitHubへ公開」すると、公開データだけが3km非公開処理されます。管理画面の元データは変更されません。
+    </p>
+  </div>
+</div>
+
 <div id="app">
 <aside id="side">
-<h1>日本バイク走破マップ v51</h1>
+<h1>日本バイク走破マップ v52.2</h1>
 <div class="actions">
 <button id="exportPublicData">公開用データを作成</button>
 <button id="loadRemote">公開データを読み込む</button>
@@ -61,7 +83,7 @@ button:hover{background:#f0f0f0}
 <div id="status" class="status">準備完了</div>
 <div class="event-header"><h2>イベント</h2><span id="eventCount" class="event-count">0件</span></div>
 <div id="events"></div>
-<p class="note"><b>このページは管理用です。</b>閲覧者には公開ページだけを案内してください。GitHubへ公開するには「GitHub設定」でTokenを一度設定します。<br><br>【v52】v51をベースに、自宅周辺のプライバシーゾーン（半径3km）を公開時だけ除外できるようにしました。走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
+<p class="note"><b>このページは管理用です。</b>閲覧者には公開ページだけを案内してください。GitHubへ公開するには「GitHub設定」でTokenを一度設定します。<br><br>【v52.2】v51をベースに、自宅周辺のプライバシーゾーン（半径3km）を公開時だけ除外できるようにしました。走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
 </aside>
 <div id="map"></div>
 </div>
@@ -516,6 +538,11 @@ map.on('click',ev=>{
 async function exportPublicData(){
   const es=await allEvents();
   if(!es.length){alert('公開用データに書き出す走行記録がありません。');return;}
+  if(!getPrivacyCenter()){
+    alert('自宅非公開地点が未設定です。先に「自宅非公開設定（3km）」で自宅位置を設定してください。');
+    openPrivacySettings();
+    return;
+  }
   const publicEs=makePublicEvents(es);
   const payload=JSON.stringify(publicEs,null,2);
   const blob=new Blob([payload],{type:'application/json;charset=utf-8'});
@@ -573,8 +600,12 @@ async function publishToGitHub(){
     if(!c.token){openGhSettings();return;}
     const es=await allEvents();
     if(!es.length){if(!confirm('走行記録が0件です。この状態を公開してよいですか？'))return;}
+    if(!getPrivacyCenter()){
+      alert('自宅非公開地点が未設定です。安全のため公開を中止しました。先に「自宅非公開設定（3km）」で自宅位置を設定してください。');
+      openPrivacySettings();
+      return;
+    }
     const publicEs=makePublicEvents(es);
-    if(!getPrivacyCenter()){if(!confirm('自宅非公開地点が未設定です。このまま公開すると自宅周辺が隠れません。続行しますか？'))return;}
     status('GitHubへ公開しています…');
     let sha=null;
     try{const cur=await ghRequest('GET',c.path);sha=cur.sha;}catch(err){if(!/Not Found/i.test(err.message))throw err;}
@@ -591,6 +622,7 @@ function openGhSettings(){
   githubConfig.style.display='flex';
 }
 loginBtn.onclick=()=>{
+  loginError.textContent='';
   if(loginPassword.value===ADMIN_PASSWORD){login.style.display='none';document.getElementById('app').style.display='flex';}
   else loginError.textContent='パスワードが違います。';
 };
