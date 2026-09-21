@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>日本バイク走破マップ v54.2</title>
+<title>日本バイク走破マップ v54.3</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#222}
 #app{display:flex;height:100vh}
 #side{width:360px;box-sizing:border-box;padding:16px;overflow:auto;border-right:1px solid #ddd;background:#fafafa}
-#map{flex:1}
+#map{flex:1;position:relative}
 h1{font-size:20px;margin:0 0 12px}
 h2{font-size:15px;margin:20px 0 8px}
 button{border:1px solid #bbb;border-radius:6px;background:white;padding:7px 10px;cursor:pointer}
@@ -20,6 +20,7 @@ button:hover{background:#f0f0f0}
 .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .status{font-size:13px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:6px;white-space:pre-wrap}
 .note{font-size:12px;color:#666;line-height:1.5}
+#map-credit{position:absolute;right:0;bottom:0;z-index:10000;background:rgba(255,255,255,.95);padding:4px 7px;font-size:11px;line-height:1.35;color:#333;max-width:90%;text-align:right;box-sizing:border-box;border:1px solid rgba(0,0,0,.15);pointer-events:none}
 </style>
 </head>
 <body>
@@ -71,7 +72,7 @@ button:hover{background:#f0f0f0}
 
 <div id="app">
 <aside id="side">
-<h1>日本バイク走破マップ v54.2</h1>
+<h1>日本バイク走破マップ v54.3</h1>
 <div class="actions">
 <button id="exportPublicData">公開用データを作成</button>
 <button id="loadRemote">公開データを読み込む</button>
@@ -85,7 +86,7 @@ button:hover{background:#f0f0f0}
 <div id="events"></div>
 <p class="note"><b>このページは管理用です。</b>閲覧者には公開ページだけを案内してください。GitHubへ公開するには「GitHub設定」でTokenを一度設定します。<br><br>【v54.2】v51をベースに、自宅周辺のプライバシーゾーン（半径3km）を公開時だけ除外します。3km円を横切る線分も正確に切断します。走行ルートそのものを保存・表示するシンプル版です。道路ラベル取得機能は廃止し、地図上の赤い走行線をクリックすると、その場所を走ったイベントの履歴を表示します。同じ区間を複数回走った場合は、該当する複数イベントをまとめて表示します。イベント名は読み込んだファイル名をそのまま使用します。</p>
 </aside>
-<div id="map"></div>
+<div id="map"><div id="map-credit">Sources: Esri, DeLorme, HERE, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), MapmyIndia, TomTom | Leaflet</div></div>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
