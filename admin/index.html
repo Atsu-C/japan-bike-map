@@ -401,8 +401,7 @@ async function migrateFromOldDB(){
  }
  return [];
 }
-drawPrivacyMarker();
-openDB().then(async()=>{let es=await migrateFromOldDB();await renderEvents();for(let e of es)drawEvent(e);status(es.length?'既存の走行記録を引き継ぎました。準備完了':'準備完了')}).catch(e=>status('データベース初期化エラー\n'+e.message));
+openDB().then(async()=>{let es=await migrateFromOldDB();await renderEvents();for(let e of es)drawEvent(e);drawPrivacyMarker();status(es.length?'既存の走行記録を引き継ぎました。準備完了':'準備完了')}).catch(e=>status('データベース初期化エラー\n'+e.message));
 
 const PRIVACY_RADIUS_M=3000;
 const PRIVACY_KEY='jbmPrivacyCenter';
